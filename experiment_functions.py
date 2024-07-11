@@ -8,6 +8,7 @@ import time
 ## Importing libraries for the Gaussian Mixture Model
 
 from scipy.stats import multivariate_normal
+from scipy.stats import norm
 
 ## Definition of useful functions for the Gaussian Mixture Model
 
@@ -63,6 +64,8 @@ def evaluate_gaussian_mixture(x, weights, centers, covariances):
     
     n_components = len(weights)
 
+    dim_var = x.shape[0]
+
     pdf = np.zeros(1)
 
     for i in range(n_components):
@@ -70,8 +73,15 @@ def evaluate_gaussian_mixture(x, weights, centers, covariances):
         covariance = covariances[i]
         weight = weights[i]
 
-        rv = multivariate_normal(center, covariance) # On fixe la normale
-        pdf += weight * rv.pdf(x) # On évalue la densité de cette loi sur la grille des points et on somme (pondéremment)
+        if dim_var == 1:
+
+            rv = norm(center, covariance)
+            pdf += weight * rv.pdf(x)
+
+        else : 
+
+            rv = multivariate_normal(center, covariance) # On fixe la normale
+            pdf += weight * rv.pdf(x) # On évalue la densité de cette loi sur la grille des points et on somme (pondéremment)
 
     return pdf[0]
 
@@ -99,17 +109,20 @@ def grad_multimodal(x, weights, centers, covariances):
         covariance = covariances[i]
         weight = weights[i]
 
-        rv = multivariate_normal(center, covariance)
-        pdf = rv.pdf(x)
-
         if dim_var == 1:
+
+            rv = norm(center, covariance)
+            pdf = rv.pdf(x)
 
             cov_inv = 1 / covariance
             diff = (x - center)
 
             gradient += weight * (cov_inv * diff) * pdf
+
+        else : 
             
-        else: 
+            rv = multivariate_normal(center, covariance)
+            pdf = rv.pdf(x)
             
             cov_inv = np.linalg.inv(covariance)
             diff = x - center
