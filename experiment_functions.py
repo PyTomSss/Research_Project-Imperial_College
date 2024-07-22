@@ -78,6 +78,8 @@ def evaluate_gaussian_mixture(x, weights, centers, covariances):
 
     pdf = np.zeros(x.shape[0]) #Question
 
+    pdf_tot = 0
+
     for i in range(n_components):
         center = centers[i]
         weight = weights[i]
