@@ -13,6 +13,7 @@ from scipy.stats import multivariate_normal
 
 from scipy.stats import wasserstein_distance
 from scipy.stats import entropy # KL-divergence
+import ot # Optimal transport and Wasserstein distance (multidimensional)
 
 
 ## Definition of useful functions for the Gaussian Mixture Model
@@ -101,7 +102,7 @@ def grad_multimodal_opti(x, weights, centers, covariances):
 
     gradient = np.zeros(x.shape)
 
-    covariance = covariances[0]
+    covariance = covariances[0] #Warning : we assume that all the covariances are the same
 
     cov_inv = np.linalg.inv(covariance)
 
@@ -205,7 +206,7 @@ def ULA_dilation(x_init, nb_iter, step, weights, centers, covariances, end_sched
 
     gradient_term = np.zeros(sample_size)
 
-    time = np.zeros(sample_size) #Each particle follows its own time-line ? ? 
+    time = np.zeros(sample_size) #Each particle follows its own time-line 
 
     step_tab = np.full(sample_size, step) 
 
@@ -704,9 +705,32 @@ def KL_divergence(distrib_P, distrib_Q):
     return entropy(pk=distrib_P, qk=distrib_Q)
 
 
-#Then, Wasserstein Distance between two distributions
+#Then, Wasserstein Distance between two distributions (1-Dimensional)
 
-def wasser_dist(distrib_P, distrib_Q): 
+def wasserstein_dist_multidim(x, y):
+    """
+    Compute Wasserstein distance for Multidimensionnal distributions.
+    
+    Parameters:
+    - x: numpy array, distribution P (shape: (n_samples, n_dimensions))
+    - y: numpy array, distribution Q (shape: (n_samples, n_dimensions))
+    
+    Returns:
+    - Distance de Wasserstein (float)
+    """
+    mask_x = ~np.isnan(x).any(axis=1)
+    clean_x = x[mask_x]
+
+    mask_y = ~np.isnan(y).any(axis=1)
+    clean_y = y[mask_y]
+
+    dist = ot.sliced_wasserstein_distance(clean_x, clean_y) #100 arbitraire pour le nb de projections
+    
+    return dist
+
+
+
+def wasser_dist_1D(distrib_P, distrib_Q): 
 
     return wasserstein_distance(distrib_P, distrib_Q)
 
@@ -715,9 +739,13 @@ def wasser_dist(distrib_P, distrib_Q):
 
 def MMS(intermediate_sample, weights, centers):
 
+    loc_nan = ~np.isnan(intermediate_sample).any(axis=1)
+
+    clean_sample = intermediate_sample[loc_nan] 
+
     nb_components = weights.shape[0]
 
-    sample_size = intermediate_sample.shape[0]
+    sample_size = clean_sample.shape[0]
 
     if len(centers) != nb_components: 
         raise ValueError('Dimension Problem')
@@ -727,11 +755,11 @@ def MMS(intermediate_sample, weights, centers):
     dist = np.zeros(sample_size)
 
     # Initialisation avec la première distance
-    tab = np.linalg.norm(intermediate_sample - centers[0], axis=1)
+    tab = np.linalg.norm(clean_sample - centers[0], axis=1)
     
     for j in range(nb_components - 1):
 
-        dist = np.nan_to_num(np.linalg.norm(intermediate_sample - centers[j + 1], axis=1))
+        dist = np.linalg.norm(clean_sample - centers[j + 1], axis=1)
 
         tab = np.nanmin(np.vstack([tab, dist]), axis=0)
 
