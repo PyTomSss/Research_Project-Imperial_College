@@ -140,39 +140,24 @@ def ULA(x_init, nb_iter, step, weights, centers, covariances, plot = True, vecto
 
     gradient_term = np.zeros(sample_size)
 
-    if all_traj : 
+    all_traj_vect = np.zeros((nb_iter, sample_size, dim_var))
 
-        all_traj_vect = np.zeros((nb_iter, sample_size, dim_var))
+    for i in tqdm(range(nb_iter)):
 
-        for i in tqdm(range(nb_iter)):
+        # Each iteration we compute the gradient of the target distribution and update the position of the particles
+        grad = grad_multimodal_opti(x, weights, centers, covariances)
 
-            # Each iteration we compute the gradient of the target distribution and update the position of the particles
-            grad = grad_multimodal_opti(x, weights, centers, covariances)
+        noise =  np.sqrt(2 * step) * np.random.randn(sample_size, dim_var)
 
-            noise =  np.sqrt(2 * step) * np.random.randn(sample_size, dim_var)
+        stochastic_term += np.linalg.norm(noise, axis = 1)
 
-            stochastic_term += np.linalg.norm(noise, axis = 1)
+        gradient_term += np.linalg.norm(step * grad, axis = 1) #Size of this vector is nb_particles
 
-            gradient_term += np.linalg.norm(step * grad, axis = 1) #Size of this vector is nb_particles
+        x = x + step * grad + noise
 
-            x = x + step * grad + noise
+        if all_traj : 
 
             all_traj_vect[i] = x
-
-    else: 
-
-        for i in tqdm(range(nb_iter)):
-
-            # Each iteration we compute the gradient of the target distribution and update the position of the particles
-            grad = grad_multimodal_opti(x, weights, centers, covariances)
-
-            noise =  np.sqrt(2 * step) * np.random.randn(1000, 2)
-
-            stochastic_term += np.linalg.norm(noise, axis = 1)
-
-            gradient_term += np.linalg.norm(step * grad, axis = 1) #Size of this vector is nb_particles
-
-            x = x + step * grad + noise
 
     if plot: 
 
@@ -341,7 +326,7 @@ def TULA(x_init, nb_iter, step, weights, centers, covariances, plot = True, vect
 
 ## We define the TULA with dilation path
 
-def TULA_dilation(x_init, nb_iter, step, weights, centers, covariances, end_schedule,
+def TULA_dilation(x_init, nb_iter, step, weights, centers, covariances, start_schedule, end_schedule,
                    plot = True, vector_result = False, all_traj = False): 
 
     x = x_init
@@ -356,61 +341,36 @@ def TULA_dilation(x_init, nb_iter, step, weights, centers, covariances, end_sche
 
     time = np.zeros(sample_size) #Each particle follows its own time-line ? ? 
 
-    step_tab = np.full(sample_size, step)
+    step_tab = np.full(sample_size, step) 
 
-    if all_traj: 
+    all_traj_vect = np.zeros((nb_iter, sample_size, dim_var))
 
-        all_traj_vect = np.zeros((nb_iter, sample_size, dim_var))
+    for i in tqdm(range(nb_iter)):
 
-        for i in tqdm(range(nb_iter)):
+        time += step_tab
 
-            time += step_tab
+        schedule = np.minimum(start_schedule + np.minimum(end_schedule, time) / end_schedule, 1)
 
-            schedule = np.minimum(end_schedule, time) / end_schedule
+        gamma = 1 / np.sqrt(schedule)
 
-            gamma = 1 / np.sqrt(schedule)
+        # Each iteration we compute the gradient of the target distribution and update the position of the particle
+        grad = gamma[:, np.newaxis] * grad_multimodal_opti(gamma[:, np.newaxis] * x, weights, centers, covariances)
 
-            # Each iteration we compute the gradient of the target distribution and update the position of the particle
-            grad = gamma[:, np.newaxis] * grad_multimodal_opti(gamma[:, np.newaxis] * x, weights, centers, covariances)
+        g_step = step_tab / (1 + step * np.linalg.norm(grad, axis = 1)) #vector of size sample_size
 
-            g_step = step_tab / (1 + step * np.linalg.norm(grad, axis = 1)) #vector of size sample_size
+        grad_update = g_step[:, np.newaxis] * grad
 
-            grad_update = g_step[:, np.newaxis] * grad
+        noise =  np.sqrt(2 * step_tab)[:, np.newaxis] * np.random.randn(sample_size, dim_var) #bien terme à terme pour sqrt 
+        
+        stochastic_term += np.linalg.norm(noise, axis = 1)
+        
+        gradient_term += np.linalg.norm(grad_update, axis = 1) #Vecteur de taille nb_particles 
 
-            noise =  np.sqrt(2 * step_tab)[:, np.newaxis] * np.random.randn(sample_size, dim_var) #bien terme à terme pour sqrt 
-            
-            stochastic_term += np.linalg.norm(noise, axis = 1)
-            
-            gradient_term += np.linalg.norm(grad_update, axis = 1) #Vecteur de taille nb_particles 
+        x = x + grad_update + noise
 
-            x = x + grad_update + noise
+        if all_traj:
 
             all_traj_vect[i] = x
-
-    else : 
-
-        for i in tqdm(range(nb_iter)):
-
-            time += step_tab
-
-            schedule = np.minimum(end_schedule, time) / end_schedule
-
-            gamma = 1 / np.sqrt(schedule)
-
-            # Each iteration we compute the gradient of the target distribution and update the position of the particle
-            grad = gamma[:, np.newaxis] * grad_multimodal_opti(gamma[:, np.newaxis] * x, weights, centers, covariances)
-
-            g_step = step_tab / (1 + step * np.linalg.norm(grad, axis = 1)) #vector of size sample_size
-
-            grad_update = g_step[:, np.newaxis] * grad
-
-            noise =  np.sqrt(2 * step_tab)[:, np.newaxis] * np.random.randn(sample_size, dim_var) #bien terme à terme pour sqrt 
-            
-            stochastic_term += np.linalg.norm(noise, axis = 1)
-            
-            gradient_term += np.linalg.norm(grad_update, axis = 1) #Vecteur de taille nb_particles 
-
-            x = x + grad_update + noise
 
     if plot: 
 
@@ -435,7 +395,7 @@ def TULA_dilation(x_init, nb_iter, step, weights, centers, covariances, end_sche
 
 ##We define the TULA coordinate-wise with dilation path
 
-def TULAc_dilation(x_init, nb_iter, step, weights, centers, covariances, end_schedule, plot = True, 
+def TULAc_dilation(x_init, nb_iter, step, weights, centers, covariances, start_schedule, end_schedule, plot = True, 
                    vector_result = False, all_traj = False): 
 
     x = x_init
@@ -452,55 +412,32 @@ def TULAc_dilation(x_init, nb_iter, step, weights, centers, covariances, end_sch
 
     step_tab = np.full(sample_size, step)
 
-    if all_traj: 
+    all_traj_vect = np.zeros((nb_iter, sample_size, dim_var))
 
-        all_traj_vect = np.zeros((nb_iter, sample_size, dim_var))
+    for i in tqdm(range(nb_iter)):
 
-        for i in tqdm(range(nb_iter)):
+        time += step_tab
 
-            time += step_tab
+        schedule = np.minimum(start_schedule + np.minimum(end_schedule, time) / end_schedule, 1)
 
-            schedule = np.minimum(end_schedule, time) / end_schedule
+        gamma = 1 / np.sqrt(schedule)
 
-            gamma = 1 / np.sqrt(schedule)
+        # Each iteration we compute the gradient of the target distribution and update the position of the particle
+        grad = gamma[:, np.newaxis] * grad_multimodal_opti(gamma[:, np.newaxis] * x, weights, centers, covariances)
 
-            # Each iteration we compute the gradient of the target distribution and update the position of the particle
-            grad = gamma[:, np.newaxis] * grad_multimodal_opti(gamma[:, np.newaxis] * x, weights, centers, covariances)
+        grad_update = (step * grad) / (1 + step * np.abs(grad))  
 
-            grad_update = (step * grad) / (1 + step * np.abs(grad))  
+        noise =  np.sqrt(2 * step_tab)[:, np.newaxis] * np.random.randn(sample_size, dim_var) #bien terme à terme pour sqrt mais pas besoin car pas constante
+        
+        stochastic_term += np.linalg.norm(noise, axis = 1)
+        
+        gradient_term += np.linalg.norm(grad_update, axis = 1) #Vecteur de taille nb_particles 
 
-            noise =  np.sqrt(2 * step_tab)[:, np.newaxis] * np.random.randn(sample_size, dim_var) #bien terme à terme pour sqrt mais pas besoin car pas constante
-            
-            stochastic_term += np.linalg.norm(noise, axis = 1)
-            
-            gradient_term += np.linalg.norm(grad_update, axis = 1) #Vecteur de taille nb_particles 
+        x = x + grad_update + noise
 
-            x = x + grad_update + noise
+        if all_traj: 
 
             all_traj_vect[i] = x
-
-    else: 
-
-        for i in tqdm(range(nb_iter)):
-
-            time += step_tab
-
-            schedule = np.minimum(end_schedule, time) / end_schedule
-
-            gamma = 1 / np.sqrt(schedule)
-
-            # Each iteration we compute the gradient of the target distribution and update the position of the particle
-            grad = gamma[:, np.newaxis] * grad_multimodal_opti(gamma[:, np.newaxis] * x, weights, centers, covariances)
-
-            grad_update = (step * grad) / (1 + step * np.abs(grad))  
-
-            noise =  np.sqrt(2 * step_tab)[:, np.newaxis] * np.random.randn(sample_size, dim_var) #bien terme à terme pour sqrt mais pas besoin car pas constante
-            
-            stochastic_term += np.linalg.norm(noise, axis = 1)
-            
-            gradient_term += np.linalg.norm(grad_update, axis = 1) #Vecteur de taille nb_particles 
-
-            x = x + grad_update + noise
 
     if plot: 
 
