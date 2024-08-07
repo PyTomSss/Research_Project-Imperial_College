@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import time
 
+from numba import jit
 ## Importing libraries for the Gaussian Mixture Model
 
 from scipy.stats import multivariate_normal
@@ -63,6 +64,14 @@ def generate_obs(x_star, theta, sigma_y) :
     y_obs = np.dot(theta, x_star.T) + noise
 
     return y_obs
+
+
+def grad_theta_GM(x_t, theta_t, y_obs, sigma_y):
+    """
+    This function can compute the gradient of the log density of our LVM (potential function), with respect to the parameters theta. 
+    """
+
+    return (-1 / sigma_y**2) * (y_obs - np.dot(x_t, theta_t.T))[:, np.newaxis] * x_t
 
 
 def post_params(theta, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs, plot = False):
@@ -188,4 +197,206 @@ def marginal_likelihood_obs(theta, x_samples, y, sigma_y):
         likelihoods.append(likelihood)
         
     return np.mean(likelihoods)
+
+
+def IPLA(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, 
+        coef_particle = 1, plot = False, plot_true_theta = None) : 
+    
+    theta_t = theta_0
+
+    dx = theta_0.shape[0]
+
+    sample = sample_prior(nb_particles, centers_prior, covariances_prior, weights_prior)
+
+    time_SDE = 0
+
+    theta_traj = np.zeros((nb_iter, dx))
+
+    for i in tqdm(range(nb_iter)) : 
+
+        #We don't need to compute the parameters of the posteriori distribution given the updated theta because we use another formula
+        #centers_post, covariances_post, weights_post = post_params(theta_t, sigma_y, centers_prior, covariances_prior, weights_prior)
+
+        time_SDE += step_size
+
+        ## on prend le gradient selon x de la posterior actualisée avec theta_t et qui est aussi une mixture Gaussienne
+        grad = ((1/sigma_y**2) * theta_t[:, np.newaxis] * (y_obs - np.dot(theta_t, sample.T))).T 
+
+        grad += grad_multimodal_opti(sample, weights_prior, centers_prior, covariances_prior) 
+
+        grad_update = step_size * grad * coef_particle
+        
+        #Noise
+        noise =  np.sqrt(2 * step_size) * np.random.randn(nb_particles, dx)
+
+        sample += grad_update + noise #Warning sign
+
+        #MAJ THETA we need a fct that compute gradient of the potential wrt to theta
+
+        grad_theta = grad_theta_GM(sample, theta_t, y_obs, sigma_y) #renvoie un vecteur avec tous les gradients
+
+        grad_theta_update = np.sum(grad_theta, axis = 0) ## ON MULTIPLIE CHAQUE PARTICLE A SON PAS SPECIFIQUE
+
+        theta_noise = np.sqrt(2 * step_size / nb_particles) * np.random.randn(2)
+
+        theta_t = theta_t - (step_size / nb_particles) * grad_theta_update + theta_noise
+
+        theta_traj[i] = theta_t
+
+    if plot : 
+        
+        centers_post, covariances_post, weights_post = post_params(plot_true_theta, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs)
+
+        generate_multimodal(centers_post, covariances_post, weights_post, sample)
+
+        plt.plot(np.arange(nb_iter), theta_traj)
+
+    return theta_traj, theta_t
+    
+
+def IPLA_dilation(nb_particles, step_size, nb_iter, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, 
+                  start_schedule, end_schedule, bound = 100, alpha = 0.01) : 
+    
+    theta_t = theta_0
+
+    dx = theta_0.shape[0]
+
+    sample = sample_prior(nb_particles, centers_prior, covariances_prior, weights_prior)
+
+    theta_traj = np.zeros((nb_iter, dx))
+
+    time_SDE = np.zeros(nb_particles) #Each particle follows its own time-line 
+
+    step_tab = np.full(nb_particles, start_schedule) 
+
+
+    for i in tqdm(range(nb_iter)) : 
+
+        #We don't need to compute the parameters of the posteriori distribution given the updated theta because we use another formula
+        #centers_post, covariances_post, weights_post = post_params(theta_t, sigma_y, centers_prior, covariances_prior, weights_prior)
+
+        time_SDE += step_tab
+
+        schedule = np.minimum(end_schedule, time_SDE) / end_schedule #end_schedule is the date from which we are using the reel target distribution
+
+        gamma = 1 / np.sqrt(schedule)
+
+        gamma_sample = gamma[:, np.newaxis] * sample
+
+        ## on prend le gradient selon x de la posterior actualisée avec theta_t et qui est aussi une mixture Gaussienne
+        grad = gamma[:, np.newaxis] * ((1/sigma_y**2) * theta_t[:, np.newaxis] * (y_obs - np.dot(theta_t, gamma_sample.T))).T 
+
+        grad += gamma[:, np.newaxis] * grad_multimodal_opti(gamma_sample, weights_prior, centers_prior, covariances_prior) 
+
+        #step_tab = np.minimum(1 / (np.linalg.norm(grad, axis = 1) + 1e-8), bound) * alpha
+        step_tab = step_tab + np.full(nb_particles, step_size)
+
+        #grad_update = step_tab[:, np.newaxis] * grad
+        grad_update = step_size * 30 * grad
+        
+        #Noise
+        #noise =  np.sqrt(2 * step_tab)[:, np.newaxis] * np.random.randn(nb_particles, dx)
+        noise =  np.sqrt(2 * step_size) * np.random.randn(nb_particles, dx)
+
+        sample += grad_update + noise #Warning sign
+
+        #MAJ THETA we need a fct that compute gradient of the potential wrt to theta
+
+        grad_theta = gamma[:, np.newaxis] * grad_theta_GM(gamma_sample, theta_t, y_obs, sigma_y) #renvoie un vecteur avec tous les gradients
+
+        grad_theta_update = np.sum(grad_theta, axis = 0) ## ON MULTIPLIE CHAQUE PARTICLE A SON PAS SPECIFIQUE
+
+        #step_size_mean = np.nanmean(step_tab) / 100
+
+        #theta_noise = np.sqrt(2 * step_size_mean / nb_particles) * np.random.randn(2)
+        theta_noise = np.sqrt(2 * step_size / nb_particles) * np.random.randn(2)
+
+        #theta_t = theta_t - (step_size_mean / nb_particles) * grad_theta_update + theta_noise
+        theta_t = theta_t - (step_size / nb_particles) * grad_theta_update + theta_noise
+
+        theta_traj[i] = theta_t
+
+    centers_post, covariances_post, weights_post = post_params(true_theta, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs)
+
+    generate_multimodal(centers_post, covariances_post, weights_post, sample)
+
+    plt.plot(np.arange(nb_iter), theta_traj)
+
+    return theta_t
+    
+
+def IPLA_dilation_taming(nb_particles, step_size, nb_iter, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, 
+                  start_schedule, end_schedule, plot = True, plot_true_theta = None) : 
+    
+    theta_t = theta_0
+
+    dx = theta_0.shape[0]
+
+    sample = sample_prior(nb_particles, centers_prior, covariances_prior, weights_prior)
+
+    theta_traj = np.zeros((nb_iter, dx))
+
+    time_SDE = 0 #Each particle follows its own time-line 
+
+    taming_coef = np.zeros(nb_particles) 
+
+    for i in tqdm(range(nb_iter)) : 
+
+        #We don't need to compute the parameters of the posteriori distribution given the updated theta because we use another formula
+        #centers_post, covariances_post, weights_post = post_params(theta_t, sigma_y, centers_prior, covariances_prior, weights_prior)
+
+        time_SDE += step_size
+
+        schedule = np.minimum(np.minimum(end_schedule, time_SDE) / end_schedule + start_schedule, 1) #end_schedule is the date from which we are using the reel target distribution
+
+        gamma = 1 / np.sqrt(schedule)
+
+        gamma_sample = gamma * sample
+
+        ## on prend le gradient selon x de la posterior actualisée avec theta_t et qui est aussi une mixture Gaussienne
+        grad = gamma * ((1/sigma_y**2) * theta_t[:, np.newaxis] * (y_obs - np.dot(theta_t, gamma_sample.T))).T 
+
+        grad += gamma * grad_multimodal_opti(gamma_sample, weights_prior, centers_prior, covariances_prior) 
+
+        taming_coef = step_size / (1 + step_size * np.linalg.norm(grad, axis = 1))
+
+        grad_update = taming_coef[:, np.newaxis] * grad
+        
+        #Noise
+        #noise =  np.sqrt(2 * step_tab)[:, np.newaxis] * np.random.randn(nb_particles, dx)
+        noise =  np.sqrt(2 * step_size) * np.random.randn(nb_particles, dx)
+
+        sample += grad_update + noise #Warning sign
+
+        #MAJ THETA we need a fct that compute gradient of the potential wrt to theta
+
+        grad_theta = gamma * grad_theta_GM(gamma_sample, theta_t, y_obs, sigma_y) #renvoie un vecteur avec tous les gradients
+
+        grad_theta_update = np.sum(grad_theta, axis = 0) ## ON MULTIPLIE CHAQUE PARTICLE A SON PAS SPECIFIQUE
+
+        #step_size_mean = np.nanmean(step_tab) / 100
+
+        #theta_noise = np.sqrt(2 * step_size_mean / nb_particles) * np.random.randn(2)
+        theta_noise = np.sqrt(2 * step_size / nb_particles) * np.random.randn(2)
+
+        #theta_t = theta_t - (step_size_mean / nb_particles) * grad_theta_update + theta_noise
+        theta_t = theta_t - (step_size / nb_particles) * grad_theta_update + theta_noise
+        #theta_t = np.abs(theta_t - (step_size / nb_particles) * grad_theta_update + theta_noise)
+
+        theta_traj[i] = theta_t
+
+    if plot : 
+
+        centers_post, covariances_post, weights_post = post_params(plot_true_theta, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs)
+
+        generate_multimodal(centers_post, covariances_post, weights_post, sample)
+
+        plt.plot(np.arange(nb_iter), theta_traj)
+
+    return theta_traj
+
+
+def mse(theta, true_theta):
+
+    return np.mean((theta - true_theta)**2, axis = 1)
     
