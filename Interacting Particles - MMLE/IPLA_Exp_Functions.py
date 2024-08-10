@@ -399,4 +399,71 @@ def IPLA_dilation_taming(nb_particles, step_size, nb_iter, centers_prior, covari
 def mse(theta, true_theta):
 
     return np.mean((theta - true_theta)**2, axis = 1)
+
+
+#ULA A VERIFIER
+def ULA_exp(sample_init, step_size, nb_iter, centers_prior, covariances_prior, weights_prior, y_obs, sigma_y, true_theta, plot = True): 
+
+    #We compute the parameters of the a posteriori, given the parametric statistical model and theta
+    centers_test, covariances_test, weights_test = post_params(true_theta, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs) 
+
+    sample_size = sample_init.shape[0]
+    dim_var = sample_init.shape[1]
+
+    traj = np.zeros((nb_iter, sample_size, dim_var))
+
+    for i in range(nb_iter): 
+        
+        #grad = grad_multimodal_opti(sample_init, weights_test, centers_test, covariances_test)
+        grad = ((1/sigma_y**2) * true_theta[:, np.newaxis] * (y_obs - np.dot(true_theta, sample_init.T))).T 
+
+        grad += grad_multimodal_opti(sample_init, weights_prior, centers_prior, covariances_prior)
+
+        sample_init += step_size * grad + np.sqrt(step_size * 2) * np.random.randn(sample_size, dim_var)
+
+        traj[i] = sample_init
+
+    ## we plot the result of the gradient descent
+    generate_multimodal(centers_test, covariances_test, weights_test, sample_init) 
+
+
+
+#ULA with DILATION A VERIFIER 
+def ULA_dilation_exp(sample_init, step_size, nb_iter, centers_prior, covariances_prior, weights_prior, y_obs, sigma_y, true_theta, start_schedule,
+                    end_schedule, plot = True): 
+    
+    #We compute the parameters of the a posteriori, given the parametric statistical model and theta
+    centers_test, covariances_test, weights_test = post_params(true_theta, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs) 
+
+    sample_size = sample_init.shape[0]
+    dim_var = sample_init.shape[1]
+
+    traj = np.zeros((nb_iter, sample_size, dim_var))
+
+    time_SDE = 0
+
+    for i in tqdm(range(nb_iter)): 
+
+        time_SDE += step_size
+
+        schedule = np.minimum(start_schedule + np.minimum(end_schedule, time_SDE) / end_schedule, 1)
+
+        gamma = 1 / np.sqrt(schedule)
+
+        gamma_sample = gamma * sample_init
+        
+        #grad = grad_multimodal_opti(sample_init, weights_test, centers_test, covariances_test)
+        grad = gamma * ((1/sigma_y**2) * true_theta[:, np.newaxis] * (y_obs - np.dot(true_theta, gamma_sample.T))).T 
+
+        grad += gamma * grad_multimodal_opti(gamma_sample, weights_prior, centers_prior, covariances_prior)
+
+        taming_coef = step_size / (1 + step_size * np.linalg.norm(grad, axis = 1))
+
+        grad_update = taming_coef[:, np.newaxis] * grad
+
+        sample_init += grad_update + np.sqrt(step_size * 2) * np.random.randn(1000, 2)
+
+        traj[i] = sample_init
+
+    generate_multimodal(centers_test, covariances_test, weights_test, sample_init)
     
