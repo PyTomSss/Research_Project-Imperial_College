@@ -17,7 +17,7 @@ from scipy.stats import norm
 
 from scipy.stats import wasserstein_distance
 from scipy.stats import entropy # KL-divergence
-import ot #Optimal Transport
+#import ot #Optimal Transport
 
 
 ## Import functions for the experiment : 
