@@ -211,7 +211,7 @@ def ULA_dilation(x_init, nb_iter, weights, centers, covariances, start_schedule,
 
         step_tab = np.minimum(1 / (np.linalg.norm(grad, axis = 1) + 1e-8), bound) * alpha #Vecteur de taille nb_particles qui donne le step pour chaque particle à cette itération
 
-        noise =  np.sqrt(2 * step_tab)[:, np.newaxis] * np.random.randn(sample_size, dim_var) #bien terme à terme pour sqrt 
+        noise = np.sqrt(2 * step_tab)[:, np.newaxis] * np.random.randn(sample_size, dim_var) #bien terme à terme pour sqrt 
         
         stochastic_term += np.linalg.norm(noise, axis = 1)
 
