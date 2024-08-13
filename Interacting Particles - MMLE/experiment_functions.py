@@ -13,7 +13,7 @@ from scipy.stats import multivariate_normal
 
 from scipy.stats import wasserstein_distance
 from scipy.stats import entropy # KL-divergence
-import ot # Optimal transport and Wasserstein distance (multidimensional)
+#import ot # Optimal transport and Wasserstein distance (multidimensional)
 
 
 ## Definition of useful functions for the Gaussian Mixture Model
