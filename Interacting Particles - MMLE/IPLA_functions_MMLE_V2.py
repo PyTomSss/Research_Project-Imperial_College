@@ -28,7 +28,7 @@ from IPLA_Exp_Functions import *
 ############### HERE WE DEFINE USEFUL FUNCTIONS RELATED TO THE EXPERIMENT : GENERATION OF PARAMETERS, SAMPLING FROM A GAUSSIAN MIXTURE, PLOT A SAMPLE....#################
 ######################################################################################################V#################V#################################################
  
-def gen_prior_param(dx, size_cube, asymmetric_modes=False): 
+def gen_prior_param(dx, size_cube, asymmetric_modes=False, multi_cov = False): 
     """
     Function to generate the parameters of the prior distribution of the experiment
     """
@@ -48,7 +48,10 @@ def gen_prior_param(dx, size_cube, asymmetric_modes=False):
     print("Shape of means array:", means_prior.shape)
 
     ## Covariance
-    covariances_prior = np.array([np.eye(dx)] * 25)
+    if multi_cov:
+        covariances_prior = np.random.randn(25, dx, dx)
+    else:
+        covariances_prior = np.array([np.eye(dx)] * 25)
     print(f"Unit Covariance Matrix: {covariances_prior[0]}")
 
     # Weights
