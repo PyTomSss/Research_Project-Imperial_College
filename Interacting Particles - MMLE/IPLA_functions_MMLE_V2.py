@@ -59,7 +59,7 @@ def gen_prior_param(dx, size_cube, asymmetric_modes=False, multi_cov = False):
         weights_prior = np.ones(25) / 25
         print(f'Weights vector : {weights_prior}')
     else:
-        weights_prior = np.random.uniform(0,10,25) 
+        weights_prior = np.random.uniform(0,20,25) 
         weights_prior /= np.sum(weights_prior)
         print(f'Weights vector : {weights_prior}')
 
