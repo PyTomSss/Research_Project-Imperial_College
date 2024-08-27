@@ -432,4 +432,332 @@ def ULA_dilation_exp_adapt_precision(sample_init, step_size, nb_iter, centers_pr
         plot_sample_dx(sample_init, "ULA with Dilation Path", sample_post, "True Posterior Sample") 
 
     return sample_init
+
+
+
+## INTERACTING PARTICLES ALGORITHMS
+
+# Compute the gradient of the multimodal potential function w.r.t the parameter theta
+def grad_theta_GM(x_t, theta_t, y_obs, sigma_y):
+    """
+    This function can compute the gradient of the log density of our LVM (potential function), with respect to the parameters theta. 
+    """
+
+    return (-1 / sigma_y**2) * (y_obs - np.dot(x_t, theta_t.T))[:, np.newaxis] * x_t
+
+
+
+def PGD_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, plot = False, plot_true_theta = None, coeff_theta = 1) : 
+    """
+    This function executes the Particle Gradient Descent in the context of our experiment. Given :
+    - The number of particles
+    - The number of iterations
+    - The step size
+    - Parameters of the prior distribution
+    - The observed data point "y"
+    - The initializing theta_0
+    """
+
+    theta_t = theta_0
+
+    dx = theta_0.shape[0]
+
+    #centers_init, covariances_init, weights_init = post_params_dx(theta_0, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs)
+    #sample = sample_prior_dx(nb_particles, centers_init, covariances_init, weights_init)
+    sample = sample_prior_dx(nb_particles, centers_prior, covariances_prior, weights_prior)
+
+    time_SDE = 0
+
+    theta_traj = np.zeros((nb_iter, dx))
+
+    for i in tqdm(range(nb_iter)) : 
+
+        #We don't need to compute the parameters of the posteriori distribution given the updated theta because we use another formula
+        #centers_post, covariances_post, weights_post = post_params(theta_t, sigma_y, centers_prior, covariances_prior, weights_prior)
+
+        time_SDE += step_size
+
+        ## on prend le gradient selon x de la posterior actualisée avec theta_t et qui est aussi une mixture Gaussienne
+        grad = ((1/sigma_y**2) * theta_t[:, np.newaxis] * (y_obs - np.dot(theta_t, sample.T))).T 
+
+        grad += grad_multimodal_opti(sample, weights_prior, centers_prior, covariances_prior) 
+
+        grad_update = step_size * grad
+        
+        #Noise
+        noise =  np.sqrt(2 * step_size) * np.random.randn(nb_particles, dx)
+
+        sample += grad_update + noise #Warning sign
+
+        #MAJ THETA we need a fct that compute gradient of the potential wrt to theta
+
+        grad_theta = grad_theta_GM(sample, theta_t, y_obs, sigma_y) #renvoie un vecteur avec tous les gradients
+
+        grad_theta_update = np.sum(grad_theta, axis = 0) ## ON MULTIPLIE CHAQUE PARTICLE A SON PAS SPECIFIQUE
+
+        theta_t = theta_t - (step_size * coeff_theta / nb_particles) * grad_theta_update 
+
+        theta_traj[i] = theta_t
+
+        if np.sum(np.isnan(sample)) // dx > 0.9*nb_particles:
+
+            print('Too many NaN in the sample')
+            
+            return sample, theta_t, theta_traj
+
+    if plot : 
+
+        centers_post, covariances_post, weights_post = post_params_dx(plot_true_theta, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs)
+        
+        sample_post = sample_prior_dx(1000, centers_post, covariances_post, weights_post)
+        
+        plot_sample_dx(sample, "PDG Sample", sample_post, "True Posterior Sample")
+
+        #plot
+        plt.figure(figsize=(10, 8))
+
+        plt.plot(theta_traj[:, 0], theta_traj[:, 1], 'o-', markersize=4, label='Theta Trajectory')
+
+        for i in range(1, len(theta_traj)):
+
+            plt.arrow(theta_traj[i-1, 0], theta_traj[i-1, 1], 
+                    theta_traj[i, 0] - theta_traj[i-1, 0], 
+                    theta_traj[i, 1] - theta_traj[i-1, 1], 
+                    head_width=0.05, head_length=0.1, fc='blue', ec='blue')
+            
+        plt.scatter(plot_true_theta[0], plot_true_theta[1], color='red', s=100, zorder=5, label='True Theta (1st 2 Dimensions)')
+        plt.text(plot_true_theta[0], plot_true_theta[1], s = f"({plot_true_theta[0]}, {plot_true_theta[1]})" , fontsize=12, verticalalignment='bottom', horizontalalignment='right')
+
+        plt.xlabel('Theta Dimension 1')
+        plt.ylabel('Theta Dimension 2')
+        plt.title(f'Trajectory of Theta in 2D - Step Size {step_size}')
+        plt.legend()
+        plt.grid(True)
+        plt.show() 
+
+    print(f'At the end, the number of NaN in the final sample of particle is {np.sum(np.isnan(sample)) // dx}')
+
+    return sample, theta_t, theta_traj
+
+
+
+def IPLA_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, plot = False, plot_true_theta = None) : 
+    """
+    This function executes the Particle Gradient Descent in the context of our experiment. Given :
+    - The number of particles
+    - The number of iterations
+    - The step size
+    - Parameters of the prior distribution
+    - The observed data point "y"
+    - The initializing theta_0
+    """
+
+    theta_t = theta_0
+
+    dx = theta_0.shape[0]
+
+    sample = sample_prior_dx(nb_particles, centers_prior, covariances_prior, weights_prior)
+
+    time_SDE = 0
+
+    theta_traj = np.zeros((nb_iter, dx))
+
+    for i in tqdm(range(nb_iter)) : 
+
+        #We don't need to compute the parameters of the posteriori distribution given the updated theta because we use another formula
+        #centers_post, covariances_post, weights_post = post_params(theta_t, sigma_y, centers_prior, covariances_prior, weights_prior)
+
+        time_SDE += step_size
+
+        ## on prend le gradient selon x de la posterior actualisée avec theta_t et qui est aussi une mixture Gaussienne
+        grad = ((1/sigma_y**2) * theta_t[:, np.newaxis] * (y_obs - np.dot(theta_t, sample.T))).T 
+
+        grad += grad_multimodal_opti(sample, weights_prior, centers_prior, covariances_prior) 
+
+        grad_update = step_size * grad
+        
+        #Noise
+        noise =  np.sqrt(2 * step_size) * np.random.randn(nb_particles, dx)
+
+        sample += grad_update + noise #Warning sign
+
+        #MAJ THETA we need a fct that compute gradient of the potential wrt to theta
+
+        grad_theta = grad_theta_GM(sample, theta_t, y_obs, sigma_y) #renvoie un vecteur avec tous les gradients
+
+        grad_theta_update = np.sum(grad_theta, axis = 0) ## ON MULTIPLIE CHAQUE PARTICLE A SON PAS SPECIFIQUE
+
+        theta_noise = np.sqrt(2 * step_size / nb_particles) * np.random.randn(dx)
+
+        theta_t = theta_t - (step_size / nb_particles) * grad_theta_update + theta_noise
+
+        theta_traj[i] = theta_t
+
+        if np.sum(np.isnan(sample)) // dx > 850:
+
+            print('Too many NaN in the sample')
+            
+            return sample, theta_t, theta_traj
+
+    if plot : 
+
+        centers_post, covariances_post, weights_post = post_params_dx(plot_true_theta, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs)
+        
+        sample_post = sample_prior_dx(1000, centers_post, covariances_post, weights_post)
+        
+        plot_sample_dx(sample, "IPLA Sample", sample_post, "True Posterior Sample")
+
+        #plot
+        plt.figure(figsize=(10, 8))
+
+        plt.plot(theta_traj[:, 0], theta_traj[:, 1], 'o-', markersize=4, label='Theta Trajectory')
+
+        for i in range(1, len(theta_traj)):
+
+            plt.arrow(theta_traj[i-1, 0], theta_traj[i-1, 1], 
+                    theta_traj[i, 0] - theta_traj[i-1, 0], 
+                    theta_traj[i, 1] - theta_traj[i-1, 1], 
+                    head_width=0.05, head_length=0.1, fc='blue', ec='blue')
+            
+        plt.scatter(plot_true_theta[0], plot_true_theta[1], color='red', s=100, zorder=5, label='True Theta (1st 2 Dimensions)')
+        plt.text(plot_true_theta[0], plot_true_theta[1], s = f"({plot_true_theta[0]}, {plot_true_theta[1]})" , fontsize=12, verticalalignment='bottom', horizontalalignment='right')
+
+        plt.xlabel('Theta Dimension 1')
+        plt.ylabel('Theta Dimension 2')
+        plt.title(f'Trajectory of Theta in 2D - Step Size {step_size}')
+        plt.legend()
+        plt.grid(True)
+        plt.show() 
+
+    print(f'At the end, the number of NaN in the final sample of particle is {np.sum(np.isnan(sample)) // dx}')
+
+    return sample, theta_t, theta_traj
+
+
+
+def IPLA_Dilation_Adapt_dx(nb_particles, nb_iter, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, start_schedule, end_schedule, 
+                           alpha = 1, bound = 100, plot = False, plot_true_theta = None) : 
+    """
+    This function executes the Particle Gradient Descent in the context of our experiment. Given :
+    - The number of particles
+    - The number of iterations
+    - The step size
+    - Parameters of the prior distribution
+    - The observed data point "y"
+    - The initializing theta_0
+    """
+
+    theta_t = theta_0
+
+    dx = theta_0.shape[0]
+
+    sample = sample_prior_dx(nb_particles, centers_prior, covariances_prior, weights_prior)
+
+    time_SDE = np.zeros(nb_particles)
+
+    step_tab = np.full(nb_particles, start_schedule)
+
+    theta_traj = np.zeros((nb_iter, dx))
+
+    for i in tqdm(range(nb_iter)): 
+
+        time_SDE += step_tab
+
+        schedule = np.minimum(end_schedule, time_SDE) / end_schedule
+
+        gamma = 1 / np.sqrt(schedule)
+
+        gamma_sample = gamma[:, np.newaxis] * sample
+        
+        grad = ((1/sigma_y**2) * theta_t[:, np.newaxis] * (y_obs - np.dot(theta_t, gamma_sample.T))).T 
+
+        grad += grad_multimodal_opti(gamma_sample, weights_prior, centers_prior, covariances_prior)
+
+        grad = gamma[:, np.newaxis] * grad
+
+        step_tab = np.minimum(1 / (np.linalg.norm(grad, axis = 1) + 1e-8), bound) * alpha #Vecteur de taille nb_particles qui donne le step pour chaque particle à cette itération
+
+        noise = np.sqrt(2 * step_tab)[:, np.newaxis] * np.random.randn(nb_particles, dx)
+
+        grad_update = step_tab[:, np.newaxis] * grad
+
+        sample += grad_update + noise
+
+
+        #MAJ THETA we need a fct that compute gradient of the potential wrt to theta
+
+        grad_theta = grad_theta_GM(sample, theta_t, y_obs, sigma_y) #renvoie un vecteur avec tous les gradients
+
+        grad_theta_update = np.sum(grad_theta, axis = 0) ## ON MULTIPLIE CHAQUE PARTICLE A SON PAS SPECIFIQUE
+
+        theta_noise = np.sqrt(2 * alpha / nb_particles) * np.random.randn(dx)
+
+        theta_t = theta_t - (alpha / nb_particles) * grad_theta_update + theta_noise
+
+        theta_traj[i] = theta_t
+
+        if np.sum(np.isnan(sample)) // dx > 850:
+
+            print('Too many NaN in the sample')
+            
+            return sample, theta_t, theta_traj
+
+    if plot : 
+
+        centers_post, covariances_post, weights_post = post_params_dx(plot_true_theta, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs)
+        
+        sample_post = sample_prior_dx(1000, centers_post, covariances_post, weights_post)
+        
+        plot_sample_dx(sample, "IPLA Sample", sample_post, "True Posterior Sample")
+
+        #plot
+        plt.figure(figsize=(10, 8))
+
+        plt.plot(theta_traj[:, 0], theta_traj[:, 1], 'o-', markersize=4, label='Theta Trajectory')
+
+        for i in range(1, len(theta_traj)):
+
+            plt.arrow(theta_traj[i-1, 0], theta_traj[i-1, 1], 
+                    theta_traj[i, 0] - theta_traj[i-1, 0], 
+                    theta_traj[i, 1] - theta_traj[i-1, 1], 
+                    head_width=0.05, head_length=0.1, fc='blue', ec='blue')
+            
+        plt.scatter(plot_true_theta[0], plot_true_theta[1], color='red', s=100, zorder=5, label='True Theta (1st 2 Dimensions)')
+        plt.text(plot_true_theta[0], plot_true_theta[1], s = f"({plot_true_theta[0]}, {plot_true_theta[1]})" , fontsize=12, verticalalignment='bottom', horizontalalignment='right')
+
+        plt.xlabel('Theta Dimension 1')
+        plt.ylabel('Theta Dimension 2')
+        plt.title(f'Trajectory of Theta in 2D - Step Size {step_size}')
+        plt.legend()
+        plt.grid(True)
+        plt.show() 
+
+    print(f'At the end, the number of NaN in the final sample of particle is {np.sum(np.isnan(sample)) // dx}')
+
+    return sample, theta_t, theta_traj
+
+
+
+def marginal_likelihood_obs(theta, y, sigma_y, centers_prior, weights_prior, log_like = False):
+
+    norm_theta = np.linalg.norm(theta)
     
+    likelihood = 0
+    
+    for i, mu in enumerate(centers_prior):
+        
+        mean_i = np.dot(theta, mu)
+
+        variance_i = norm_theta + sigma_y
+
+        likelihood += weights_prior[i] * norm.pdf(y, loc=mean_i, scale=np.sqrt(variance_i))
+
+    if log_like:
+
+        log_likelihood = np.log(likelihood)
+
+        return log_likelihood
+
+    else : 
+            
+            return likelihood
