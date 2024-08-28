@@ -262,6 +262,7 @@ def ULA_dilation_exp(sample_init, step_size, nb_iter, centers_prior, covariances
                     end_schedule, plot = True): 
     
     sample_size = sample_init.shape[0]
+    
     dim_var = sample_init.shape[1]
 
     traj = np.zeros((nb_iter, sample_size, dim_var))
