@@ -94,7 +94,7 @@ def sample_prior_dx(nb_particle_gen, centers_prior, covariances_prior, weights_p
 
 
 
-def plot_sample_dx(sample_to_plot_1, desc_sample_1 = '', sample_to_plot_2=None, desc_sample_2 = ''): 
+def plot_sample_dx(sample_to_plot_1, desc_sample_1 = '', sample_to_plot_2=None, desc_sample_2 = '', xlim = None, ylim = None) : 
 
     sns.set(style="whitegrid")
     
@@ -111,6 +111,11 @@ def plot_sample_dx(sample_to_plot_1, desc_sample_1 = '', sample_to_plot_2=None, 
     
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.gca().set_facecolor('#f7f7f7')
+
+    if xlim is not None:
+        plt.xlim(xlim)
+    if ylim is not None:
+        plt.ylim(ylim)
     
     plt.legend()
     plt.show()
