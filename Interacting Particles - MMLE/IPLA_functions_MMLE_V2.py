@@ -453,6 +453,7 @@ def grad_theta_GM(x_t, theta_t, y_obs, sigma_y):
 
 
 
+
 def PGD_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, plot = False, plot_true_theta = None, coeff_theta = 1) : 
     """
     This function executes the Particle Gradient Descent in the context of our experiment. Given :
@@ -468,34 +469,29 @@ def PGD_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, w
 
     dx = theta_0.shape[0]
 
-    #centers_init, covariances_init, weights_init = post_params_dx(theta_0, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs)
-    #sample = sample_prior_dx(nb_particles, centers_init, covariances_init, weights_init)
     sample = sample_prior_dx(nb_particles, centers_prior, covariances_prior, weights_prior)
-
-    time_SDE = 0
 
     theta_traj = np.zeros((nb_iter, dx))
 
+    marginal_likelihood_traj = np.zeros(nb_iter)
+
     for i in tqdm(range(nb_iter)) : 
 
-        #We don't need to compute the parameters of the posteriori distribution given the updated theta because we use another formula
-        #centers_post, covariances_post, weights_post = post_params(theta_t, sigma_y, centers_prior, covariances_prior, weights_prior)
-
-        time_SDE += step_size
-
-        ## on prend le gradient selon x de la posterior actualisée avec theta_t et qui est aussi une mixture Gaussienne
+        ## Gradient update
         grad = ((1/sigma_y**2) * theta_t[:, np.newaxis] * (y_obs - np.dot(theta_t, sample.T))).T 
 
         grad += grad_multimodal_opti(sample, weights_prior, centers_prior, covariances_prior) 
 
         grad_update = step_size * grad
+
         
         #Noise
         noise =  np.sqrt(2 * step_size) * np.random.randn(nb_particles, dx)
 
         sample += grad_update + noise #Warning sign
 
-        #MAJ THETA we need a fct that compute gradient of the potential wrt to theta
+        
+        # Update THETA
 
         grad_theta = grad_theta_GM(sample, theta_t, y_obs, sigma_y) #renvoie un vecteur avec tous les gradients
 
@@ -503,9 +499,12 @@ def PGD_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, w
 
         theta_t = theta_t - (step_size * coeff_theta / nb_particles) * grad_theta_update 
 
+        marginal_likelihood_traj[i] = marginal_likelihood_obs(theta_t, y_obs, sigma_y, centers_prior, weights_prior, log_like = False)
+
         theta_traj[i] = theta_t
 
-        if np.sum(np.isnan(sample)) // dx > 0.9*nb_particles:
+
+        if np.sum(np.isnan(sample)) // dx > 0.9 * nb_particles:
 
             print('Too many NaN in the sample')
             
@@ -519,7 +518,7 @@ def PGD_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, w
         
         plot_sample_dx(sample, "PDG Sample", sample_post, "True Posterior Sample")
 
-        #plot
+        #Final Plot
         plt.figure(figsize=(10, 8))
 
         plt.plot(theta_traj[:, 0], theta_traj[:, 1], 'o-', markersize=4, label='Theta Trajectory')
@@ -541,13 +540,14 @@ def PGD_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, w
         plt.grid(True)
         plt.show() 
 
+        plt.plot(marginal_likelihood_traj)
+
     print(f'At the end, the number of NaN in the final sample of particle is {np.sum(np.isnan(sample)) // dx}')
 
     return sample, theta_t, theta_traj
 
 
-
-def IPLA_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, plot = False, plot_true_theta = None) : 
+def IPLA_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, plot = False, plot_true_theta = None, coeff_theta = 1) : 
     """
     This function executes the Particle Gradient Descent in the context of our experiment. Given :
     - The number of particles
@@ -564,38 +564,36 @@ def IPLA_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, 
 
     sample = sample_prior_dx(nb_particles, centers_prior, covariances_prior, weights_prior)
 
-    time_SDE = 0
-
     theta_traj = np.zeros((nb_iter, dx))
+
+    marginal_likelihood_traj = np.zeros(nb_iter)
 
     for i in tqdm(range(nb_iter)) : 
 
-        #We don't need to compute the parameters of the posteriori distribution given the updated theta because we use another formula
-        #centers_post, covariances_post, weights_post = post_params(theta_t, sigma_y, centers_prior, covariances_prior, weights_prior)
-
-        time_SDE += step_size
-
-        ## on prend le gradient selon x de la posterior actualisée avec theta_t et qui est aussi une mixture Gaussienne
+        ## Update Particles
         grad = ((1/sigma_y**2) * theta_t[:, np.newaxis] * (y_obs - np.dot(theta_t, sample.T))).T 
 
         grad += grad_multimodal_opti(sample, weights_prior, centers_prior, covariances_prior) 
 
         grad_update = step_size * grad
         
+
         #Noise
         noise =  np.sqrt(2 * step_size) * np.random.randn(nb_particles, dx)
 
-        sample += grad_update + noise #Warning sign
+        sample += grad_update + noise 
 
-        #MAJ THETA we need a fct that compute gradient of the potential wrt to theta
 
+        # Update THETA
         grad_theta = grad_theta_GM(sample, theta_t, y_obs, sigma_y) #renvoie un vecteur avec tous les gradients
 
         grad_theta_update = np.sum(grad_theta, axis = 0) ## ON MULTIPLIE CHAQUE PARTICLE A SON PAS SPECIFIQUE
 
-        theta_noise = np.sqrt(2 * step_size / nb_particles) * np.random.randn(dx)
+        theta_noise = np.sqrt(2 * step_size * coeff_theta / nb_particles) * np.random.randn(dx)
 
-        theta_t = theta_t - (step_size / nb_particles) * grad_theta_update + theta_noise
+        theta_t = theta_t - (step_size * coeff_theta / nb_particles) * grad_theta_update + theta_noise
+
+        marginal_likelihood_traj[i] = marginal_likelihood_obs(theta_t, y_obs, sigma_y, centers_prior, weights_prior, log_like = False)
 
         theta_traj[i] = theta_t
 
@@ -634,6 +632,8 @@ def IPLA_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, 
         plt.legend()
         plt.grid(True)
         plt.show() 
+
+        plt.plot(marginal_likelihood_traj)
 
     print(f'At the end, the number of NaN in the final sample of particle is {np.sum(np.isnan(sample)) // dx}')
 
