@@ -454,7 +454,7 @@ def grad_theta_GM(x_t, theta_t, y_obs, sigma_y):
 
 
 
-def PGD_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, plot = False, plot_true_theta = None, coeff_theta = 1) : 
+def PGD_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, plot = False, plot_true_theta = None, coeff_theta = 1, xlim = None, ylim = None) : 
     """
     This function executes the Particle Gradient Descent in the context of our experiment. Given :
     - The number of particles
@@ -470,6 +470,7 @@ def PGD_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, w
     dx = theta_0.shape[0]
 
     sample = sample_prior_dx(nb_particles, centers_prior, covariances_prior, weights_prior)
+    #sample = np.random.randn(nb_particles, dx)
 
     theta_traj = np.zeros((nb_iter, dx))
 
@@ -508,7 +509,7 @@ def PGD_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, w
 
             print('Too many NaN in the sample')
             
-            return sample, theta_t, theta_traj
+            return sample, theta_t, theta_traj, marginal_likelihood_traj
 
     if plot : 
 
@@ -518,17 +519,19 @@ def PGD_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, w
         
         plot_sample_dx(sample, "PDG Sample", sample_post, "True Posterior Sample")
 
+        plot_sample_dx(sample, "PDG Sample", xlim = xlim, ylim = ylim)
+
         #Final Plot
         plt.figure(figsize=(10, 8))
 
         plt.plot(theta_traj[:, 0], theta_traj[:, 1], 'o-', markersize=4, label='Theta Trajectory')
 
-        for i in range(1, len(theta_traj)):
+        #for i in range(1, len(theta_traj)):
 
-            plt.arrow(theta_traj[i-1, 0], theta_traj[i-1, 1], 
-                    theta_traj[i, 0] - theta_traj[i-1, 0], 
-                    theta_traj[i, 1] - theta_traj[i-1, 1], 
-                    head_width=0.05, head_length=0.1, fc='blue', ec='blue')
+            #plt.arrow(theta_traj[i-1, 0], theta_traj[i-1, 1], 
+                    #theta_traj[i, 0] - theta_traj[i-1, 0], 
+                    #theta_traj[i, 1] - theta_traj[i-1, 1], 
+                    #head_width=0.05, head_length=0.1, fc='blue', ec='blue')
             
         plt.scatter(plot_true_theta[0], plot_true_theta[1], color='red', s=100, zorder=5, label='True Theta (1st 2 Dimensions)')
         plt.text(plot_true_theta[0], plot_true_theta[1], s = f"({plot_true_theta[0]}, {plot_true_theta[1]})" , fontsize=12, verticalalignment='bottom', horizontalalignment='right')
@@ -540,11 +543,13 @@ def PGD_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, w
         plt.grid(True)
         plt.show() 
 
-        plt.plot(marginal_likelihood_traj)
+        plt.plot(marginal_likelihood_traj, label = 'Marginal Likelihood')
+        plt.title('Marginal Likelihood Evolution with the number of iterations')
+        plt.show()
 
     print(f'At the end, the number of NaN in the final sample of particle is {np.sum(np.isnan(sample)) // dx}')
 
-    return sample, theta_t, theta_traj
+    return sample, theta_t, theta_traj, marginal_likelihood_traj
 
 
 def IPLA_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, plot = False, plot_true_theta = None, coeff_theta = 1) : 
