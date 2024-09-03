@@ -453,7 +453,6 @@ def grad_theta_GM(x_t, theta_t, y_obs, sigma_y):
 
 
 
-
 def PGD_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, plot = False, plot_true_theta = None, coeff_theta = 1, xlim = None, ylim = None) : 
     """
     This function executes the Particle Gradient Descent in the context of our experiment. Given :
@@ -552,7 +551,8 @@ def PGD_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, w
     return sample, theta_t, theta_traj, marginal_likelihood_traj
 
 
-def IPLA_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, plot = False, plot_true_theta = None, coeff_theta = 1) : 
+
+def IPLA_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, plot = False, plot_true_theta = None, coeff_theta = 1, xlim = None, ylim = None) : 
     """
     This function executes the Particle Gradient Descent in the context of our experiment. Given :
     - The number of particles
@@ -568,7 +568,8 @@ def IPLA_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, 
     dx = theta_0.shape[0]
 
     sample = sample_prior_dx(nb_particles, centers_prior, covariances_prior, weights_prior)
-
+    #sample = np.random.randn(nb_particles, dx)
+    
     theta_traj = np.zeros((nb_iter, dx))
 
     marginal_likelihood_traj = np.zeros(nb_iter)
@@ -606,7 +607,7 @@ def IPLA_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, 
 
             print('Too many NaN in the sample')
             
-            return sample, theta_t, theta_traj
+            return sample, theta_t, theta_traj, marginal_likelihood_traj
 
     if plot : 
 
@@ -615,18 +616,19 @@ def IPLA_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, 
         sample_post = sample_prior_dx(1000, centers_post, covariances_post, weights_post)
         
         plot_sample_dx(sample, "IPLA Sample", sample_post, "True Posterior Sample")
-
+        #plot_sample_dx(sample, "IPLA Sample", xlim = xlim, ylim = ylim)
+        
         #plot
         plt.figure(figsize=(10, 8))
 
         plt.plot(theta_traj[:, 0], theta_traj[:, 1], 'o-', markersize=4, label='Theta Trajectory')
 
-        for i in range(1, len(theta_traj)):
+        #for i in range(1, len(theta_traj)):
 
-            plt.arrow(theta_traj[i-1, 0], theta_traj[i-1, 1], 
-                    theta_traj[i, 0] - theta_traj[i-1, 0], 
-                    theta_traj[i, 1] - theta_traj[i-1, 1], 
-                    head_width=0.05, head_length=0.1, fc='blue', ec='blue')
+            #plt.arrow(theta_traj[i-1, 0], theta_traj[i-1, 1], 
+                    #theta_traj[i, 0] - theta_traj[i-1, 0], 
+                    #theta_traj[i, 1] - theta_traj[i-1, 1], 
+                    #head_width=0.05, head_length=0.1, fc='blue', ec='blue')
             
         plt.scatter(plot_true_theta[0], plot_true_theta[1], color='red', s=100, zorder=5, label='True Theta (1st 2 Dimensions)')
         plt.text(plot_true_theta[0], plot_true_theta[1], s = f"({plot_true_theta[0]}, {plot_true_theta[1]})" , fontsize=12, verticalalignment='bottom', horizontalalignment='right')
@@ -642,12 +644,13 @@ def IPLA_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, 
 
     print(f'At the end, the number of NaN in the final sample of particle is {np.sum(np.isnan(sample)) // dx}')
 
-    return sample, theta_t, theta_traj
+    return sample, theta_t, theta_traj, marginal_likelihood_traj
 
 
 
-def IPLA_Dilation_Adapt_dx(nb_particles, nb_iter, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, start_schedule, end_schedule, 
-                           alpha = 1, bound = 100, plot = False, plot_true_theta = None) : 
+
+def IPLA_Dilation_Adapt_dx(nb_particles, step_param, nb_iter, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, start_schedule, end_schedule, 
+                           alpha = 1, bound = 100, plot = False, plot_true_theta = None, xlim = None, ylim = None) : 
     """
     This function executes the Particle Gradient Descent in the context of our experiment. Given :
     - The number of particles
@@ -663,15 +666,23 @@ def IPLA_Dilation_Adapt_dx(nb_particles, nb_iter, centers_prior, covariances_pri
     dx = theta_0.shape[0]
 
     sample = sample_prior_dx(nb_particles, centers_prior, covariances_prior, weights_prior)
-
+    #sample = np.random.randn(nb_particles, dx)
+    
     time_SDE = np.zeros(nb_particles)
 
     step_tab = np.full(nb_particles, start_schedule)
 
     theta_traj = np.zeros((nb_iter, dx))
 
+    marginal_likelihood_traj = np.zeros(nb_iter)
+
+    schedule_traj = np.zeros(nb_iter)
+
+    step_tab_traj = np.zeros(nb_iter)
+
     for i in tqdm(range(nb_iter)): 
 
+        ## Update Time & Schedule
         time_SDE += step_tab
 
         schedule = np.minimum(end_schedule, time_SDE) / end_schedule
@@ -679,7 +690,9 @@ def IPLA_Dilation_Adapt_dx(nb_particles, nb_iter, centers_prior, covariances_pri
         gamma = 1 / np.sqrt(schedule)
 
         gamma_sample = gamma[:, np.newaxis] * sample
-        
+
+
+        ## Update Particles
         grad = ((1/sigma_y**2) * theta_t[:, np.newaxis] * (y_obs - np.dot(theta_t, gamma_sample.T))).T 
 
         grad += grad_multimodal_opti(gamma_sample, weights_prior, centers_prior, covariances_prior)
@@ -695,15 +708,22 @@ def IPLA_Dilation_Adapt_dx(nb_particles, nb_iter, centers_prior, covariances_pri
         sample += grad_update + noise
 
 
-        #MAJ THETA we need a fct that compute gradient of the potential wrt to theta
-
+        #Update Theta
         grad_theta = grad_theta_GM(sample, theta_t, y_obs, sigma_y) #renvoie un vecteur avec tous les gradients
 
         grad_theta_update = np.sum(grad_theta, axis = 0) ## ON MULTIPLIE CHAQUE PARTICLE A SON PAS SPECIFIQUE
 
-        theta_noise = np.sqrt(2 * alpha / nb_particles) * np.random.randn(dx)
+        theta_noise = np.sqrt(2 * step_param / nb_particles) * np.random.randn(dx)
 
-        theta_t = theta_t - (alpha / nb_particles) * grad_theta_update + theta_noise
+        theta_t = theta_t - (step_param / nb_particles) * grad_theta_update + theta_noise
+
+
+        #Update trajectories 
+        marginal_likelihood_traj[i] = marginal_likelihood_obs(theta_t, y_obs, sigma_y, centers_prior, weights_prior, log_like = False)
+
+        schedule_traj[i] = np.mean(schedule)
+
+        step_tab_traj[i] = np.mean(step_tab)
 
         theta_traj[i] = theta_t
 
@@ -715,38 +735,44 @@ def IPLA_Dilation_Adapt_dx(nb_particles, nb_iter, centers_prior, covariances_pri
 
     if plot : 
 
-        centers_post, covariances_post, weights_post = post_params_dx(plot_true_theta, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs)
+        #centers_post, covariances_post, weights_post = post_params_dx(plot_true_theta, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs)
         
-        sample_post = sample_prior_dx(1000, centers_post, covariances_post, weights_post)
+        #sample_post = sample_prior_dx(1000, centers_post, covariances_post, weights_post)
         
-        plot_sample_dx(sample, "IPLA Sample", sample_post, "True Posterior Sample")
-
+        #plot_sample_dx(sample, "IPLA Sample", sample_post, "True Posterior Sample")
+        plot_sample_dx(sample, "IPLA Dilation Sample", xlim = xlim, ylim = ylim)
+        
         #plot
         plt.figure(figsize=(10, 8))
 
         plt.plot(theta_traj[:, 0], theta_traj[:, 1], 'o-', markersize=4, label='Theta Trajectory')
 
-        for i in range(1, len(theta_traj)):
+        #for i in range(1, len(theta_traj)):
 
-            plt.arrow(theta_traj[i-1, 0], theta_traj[i-1, 1], 
-                    theta_traj[i, 0] - theta_traj[i-1, 0], 
-                    theta_traj[i, 1] - theta_traj[i-1, 1], 
-                    head_width=0.05, head_length=0.1, fc='blue', ec='blue')
+            #plt.arrow(theta_traj[i-1, 0], theta_traj[i-1, 1], 
+                    #theta_traj[i, 0] - theta_traj[i-1, 0], 
+                    #theta_traj[i, 1] - theta_traj[i-1, 1], 
+                    #head_width=0.05, head_length=0.1, fc='blue', ec='blue')
             
         plt.scatter(plot_true_theta[0], plot_true_theta[1], color='red', s=100, zorder=5, label='True Theta (1st 2 Dimensions)')
         plt.text(plot_true_theta[0], plot_true_theta[1], s = f"({plot_true_theta[0]}, {plot_true_theta[1]})" , fontsize=12, verticalalignment='bottom', horizontalalignment='right')
 
         plt.xlabel('Theta Dimension 1')
         plt.ylabel('Theta Dimension 2')
-        plt.title(f'Trajectory of Theta in 2D - Step Size {step_size}')
+        plt.title(f'Trajectory of Theta in 2D - Step Size {step_param}')
         plt.legend()
         plt.grid(True)
         plt.show() 
 
+        plt.figure(figsize=(7, 7))
+        plt.plot(marginal_likelihood_traj, label='Marginal Likelihood')
+        plt.plot(schedule_traj, label='Schedule')
+        plt.plot(step_tab_traj, label='Step Size')
+        plt.legend()
+
     print(f'At the end, the number of NaN in the final sample of particle is {np.sum(np.isnan(sample)) // dx}')
 
-    return sample, theta_t, theta_traj
-
+    return sample, theta_t, theta_traj, marginal_likelihood_traj
 
 
 def marginal_likelihood_obs(theta, y, sigma_y, centers_prior, weights_prior, log_like = False):
