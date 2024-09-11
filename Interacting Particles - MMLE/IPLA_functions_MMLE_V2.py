@@ -648,7 +648,6 @@ def IPLA_dx(nb_particles, nb_iter, step_size, centers_prior, covariances_prior, 
 
 
 
-
 def IPLA_Dilation_Adapt_dx(nb_particles, step_param, nb_iter, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, start_schedule, end_schedule, 
                            alpha = 1, bound = 100, plot = False, plot_true_theta = None, xlim = None, ylim = None) : 
     """
@@ -773,6 +772,7 @@ def IPLA_Dilation_Adapt_dx(nb_particles, step_param, nb_iter, centers_prior, cov
     print(f'At the end, the number of NaN in the final sample of particle is {np.sum(np.isnan(sample)) // dx}')
 
     return sample, theta_t, theta_traj, marginal_likelihood_traj
+
 
 
 def marginal_likelihood_obs(theta, y, sigma_y, centers_prior, weights_prior, log_like = False):
