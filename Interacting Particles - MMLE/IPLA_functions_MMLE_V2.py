@@ -388,6 +388,69 @@ def ULA_dilation_exp_adapt(sample_init, step_size, nb_iter, centers_prior, covar
     return sample_init
  
 
+## We define the same method with a coordinate-wise adaptive step-size
+def ULA_dilation_exp_adapt_c(sample_init, step_size, nb_iter, centers_prior, covariances_prior, weights_prior, y_obs, sigma_y, 
+                             true_theta, start_schedule, end_schedule, alpha = 1, bound = 100, plot = True): 
+    
+    sample_size = sample_init.shape[0]
+    
+    dim_var = sample_init.shape[1]
+
+    traj = np.zeros((nb_iter, sample_size, dim_var))
+
+    time_SDE = np.zeros(sample_size) #Each particle follows its own time-line 
+
+    step_tab = np.full((sample_size, dim_var), start_schedule)  
+
+    schedule_tab = np.zeros(nb_iter)
+
+    for i in tqdm(range(nb_iter)): 
+
+        time_SDE += np.mean(step_tab, axis = 1)
+
+        schedule = np.minimum(end_schedule, time_SDE) / end_schedule
+
+        schedule_tab[i] = np.mean(schedule)
+
+        gamma = 1 / np.sqrt(schedule)
+
+        gamma_sample = gamma[:, np.newaxis] * sample_init
+        
+        grad = ((1/sigma_y**2) * true_theta[:, np.newaxis] * (y_obs - np.dot(true_theta, gamma_sample.T))).T 
+
+        grad += grad_multimodal_opti(gamma_sample, weights_prior, centers_prior, covariances_prior)
+
+        grad = gamma[:, np.newaxis] * grad
+
+        step_tab = np.minimum(1 / (np.abs(grad) + 1e-8), bound) * alpha #Vecteur de taille nb_particles qui donne le step pour chaque particle à cette itération
+        
+        noise = np.sqrt(2 * step_tab) * np.random.randn(sample_size, dim_var)
+
+        grad_update = step_tab * grad
+
+        sample_init += grad_update + noise
+
+        traj[i] = sample_init
+
+        if np.sum(np.isnan(sample_init)) // dim_var > 850:
+
+            print('Too many NaN in the sample')
+            
+            return sample_init
+    
+    plt.plot(np.arange(nb_iter), schedule_tab)
+
+    if plot : 
+
+        centers_post, covariances_post, weights_post = post_params_dx(true_theta, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs)
+        
+        sample_post = sample_prior_dx(1000, centers_post, covariances_post, weights_post)
+        
+        plot_sample_dx(sample_init, "ULA with Dilation Path", sample_post, "True Posterior Sample") 
+
+    return sample_init
+
+
 
 ###NEED TO BE MODIFIED
 def ULA_dilation_exp_adapt_precision(sample_init, step_size, nb_iter, centers_prior, covariances_prior, weights_prior, y_obs, sigma_y, true_theta, start_schedule,
@@ -772,6 +835,133 @@ def IPLA_Dilation_Adapt_dx(nb_particles, step_param, nb_iter, centers_prior, cov
     print(f'At the end, the number of NaN in the final sample of particle is {np.sum(np.isnan(sample)) // dx}')
 
     return sample, theta_t, theta_traj, marginal_likelihood_traj
+
+
+## Here we define the same method with a coordinate-wise adaptive step-size
+def IPLA_Dilation_Adaptc_dx(nb_particles, step_param, nb_iter, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, start_schedule, end_schedule, 
+                           alpha = 1, bound = 100, plot = False, plot_true_theta = None, xlim = None, ylim = None) : 
+    """
+    This function executes the Particle Gradient Descent in the context of our experiment. Given :
+    - The number of particles
+    - The number of iterations
+    - The step size
+    - Parameters of the prior distribution
+    - The observed data point "y"
+    - The initializing theta_0
+    """
+
+    theta_t = theta_0
+
+    dx = theta_0.shape[0]
+
+    sample = sample_prior_dx(nb_particles, centers_prior, covariances_prior, weights_prior)
+    
+    time_SDE = np.zeros(nb_particles)
+
+    step_tab = np.full((nb_particles, dx), start_schedule)
+
+    theta_traj = np.zeros((nb_iter, dx))
+
+    marginal_likelihood_traj = np.zeros(nb_iter)
+
+    schedule_traj = np.zeros(nb_iter)
+
+    step_tab_traj = np.zeros(nb_iter)
+
+    for i in tqdm(range(nb_iter)): 
+
+        ## Update Time & Schedule
+        time_SDE += np.mean(step_tab, axis = 1)
+
+        schedule = np.minimum(end_schedule, time_SDE) / end_schedule
+
+        gamma = 1 / np.sqrt(schedule)
+
+        gamma_sample = gamma[:, np.newaxis] * sample
+
+
+        ## Update Particles
+        grad = ((1/sigma_y**2) * theta_t[:, np.newaxis] * (y_obs - np.dot(theta_t, gamma_sample.T))).T 
+
+        grad += grad_multimodal_opti(gamma_sample, weights_prior, centers_prior, covariances_prior)
+
+        grad = gamma[:, np.newaxis] * grad
+
+        step_tab = np.minimum(1 / (np.abs(grad) + 1e-8), bound) * alpha #Vecteur de taille nb_particles qui donne le step pour chaque particle à cette itération
+
+        noise = np.sqrt(2 * step_tab) * np.random.randn(nb_particles, dx)
+
+        grad_update = step_tab * grad
+
+        sample += grad_update + noise
+
+
+        #Update Theta
+        grad_theta = grad_theta_GM(sample, theta_t, y_obs, sigma_y) #renvoie un vecteur avec tous les gradients
+
+        grad_theta_update = np.sum(grad_theta, axis = 0) ## ON MULTIPLIE CHAQUE PARTICLE A SON PAS SPECIFIQUE
+
+        theta_noise = np.sqrt(2 * step_param / nb_particles) * np.random.randn(dx)
+
+        theta_t = theta_t - (step_param / nb_particles) * grad_theta_update + theta_noise
+
+
+        #Update trajectories 
+        marginal_likelihood_traj[i] = marginal_likelihood_obs(theta_t, y_obs, sigma_y, centers_prior, weights_prior, log_like = False)
+
+        schedule_traj[i] = np.mean(schedule)
+
+        step_tab_traj[i] = np.mean(step_tab)
+
+        theta_traj[i] = theta_t
+
+        if np.sum(np.isnan(sample)) // dx > 850:
+
+            print('Too many NaN in the sample')
+            
+            return sample, theta_t, theta_traj
+
+    if plot : 
+
+        #centers_post, covariances_post, weights_post = post_params_dx(plot_true_theta, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs)
+        
+        #sample_post = sample_prior_dx(1000, centers_post, covariances_post, weights_post)
+        
+        #plot_sample_dx(sample, "IPLA Sample", sample_post, "True Posterior Sample")
+        plot_sample_dx(sample, "IPLA Dilation Sample", xlim = xlim, ylim = ylim)
+        
+        #plot
+        plt.figure(figsize=(10, 8))
+
+        plt.plot(theta_traj[:, 0], theta_traj[:, 1], 'o-', markersize=4, label='Theta Trajectory')
+
+        #for i in range(1, len(theta_traj)):
+
+            #plt.arrow(theta_traj[i-1, 0], theta_traj[i-1, 1], 
+                    #theta_traj[i, 0] - theta_traj[i-1, 0], 
+                    #theta_traj[i, 1] - theta_traj[i-1, 1], 
+                    #head_width=0.05, head_length=0.1, fc='blue', ec='blue')
+            
+        plt.scatter(plot_true_theta[0], plot_true_theta[1], color='red', s=100, zorder=5, label='True Theta (1st 2 Dimensions)')
+        plt.text(plot_true_theta[0], plot_true_theta[1], s = f"({plot_true_theta[0]}, {plot_true_theta[1]})" , fontsize=12, verticalalignment='bottom', horizontalalignment='right')
+
+        plt.xlabel('Theta Dimension 1')
+        plt.ylabel('Theta Dimension 2')
+        plt.title(f'Trajectory of Theta in 2D - Step Size {step_param}')
+        plt.legend()
+        plt.grid(True)
+        plt.show() 
+
+        plt.figure(figsize=(7, 7))
+        plt.plot(marginal_likelihood_traj, label='Marginal Likelihood')
+        plt.plot(schedule_traj, label='Schedule')
+        plt.plot(step_tab_traj, label='Step Size')
+        plt.legend()
+
+    print(f'At the end, the number of NaN in the final sample of particle is {np.sum(np.isnan(sample)) // dx}')
+
+    return sample, theta_t, theta_traj, marginal_likelihood_traj
+
 
 
 
