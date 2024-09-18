@@ -28,6 +28,7 @@ from IPLA_Exp_Functions import *
 ############### HERE WE DEFINE USEFUL FUNCTIONS RELATED TO THE EXPERIMENT : GENERATION OF PARAMETERS, SAMPLING FROM A GAUSSIAN MIXTURE, PLOT A SAMPLE....#################
 ######################################################################################################V#################V#################################################
  
+
 def gen_prior_param(dx, size_cube, asymmetric_modes=False, multi_cov = False): 
     """
     Function to generate the parameters of the prior distribution of the experiment
@@ -182,6 +183,7 @@ def post_params_dx(theta, sigma_y, centers_prior, covariances_prior, weights_pri
 ##########################################################################################################################################################################
 ########## HERE WE DEFINE DIFFERENTS ALGORITHMS TO SAMPLE FROM THE POSTERIOR DISTRIBUTION OF THE MODEL KNOWING THE PARAMETERS : ULA, ULA with Dilation Path... ###########
 ######################################################################################################V#################V#################################################
+
 
 def grad_descent_post_dx(sample_init, step_size, nb_iter, centers_prior, covariances_prior, weights_prior, y_obs, sigma_y, true_theta, plot = True): 
 
@@ -504,7 +506,10 @@ def ULA_dilation_exp_adapt_precision(sample_init, step_size, nb_iter, centers_pr
 
 
 
-## INTERACTING PARTICLES ALGORITHMS
+##########################################################################################################################################################################
+########## HERE WE DEFINE DIFFERENTS PARTICLE-BASED ALGORITHMS FOR THE PROBLEM OF MAXIMUM MARGINAL LIKELIHOOD ESTIMATION: PGD, IPLA, IPLA with DILATION PATH... ##########
+######################################################################################################V#################V#################################################
+
 
 # Compute the gradient of the multimodal potential function w.r.t the parameter theta
 def grad_theta_GM(x_t, theta_t, y_obs, sigma_y):
@@ -837,6 +842,7 @@ def IPLA_Dilation_Adapt_dx(nb_particles, step_param, nb_iter, centers_prior, cov
     return sample, theta_t, theta_traj, marginal_likelihood_traj
 
 
+
 ## Here we define the same method with a coordinate-wise adaptive step-size
 def IPLA_Dilation_Adaptc_dx(nb_particles, step_param, nb_iter, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, start_schedule, end_schedule, 
                            alpha = 1, bound = 100, plot = False, plot_true_theta = None, xlim = None, ylim = None) : 
@@ -962,6 +968,124 @@ def IPLA_Dilation_Adaptc_dx(nb_particles, step_param, nb_iter, centers_prior, co
 
     return sample, theta_t, theta_traj, marginal_likelihood_traj
 
+
+
+## Here we define the Dilation Path with tamed coefficients (not really convincing in practice)
+def IPLA_Dilation_Taming(nb_particles, step_size, nb_iter, centers_prior, covariances_prior, weights_prior, theta_0, sigma_y, y_obs, start_schedule, end_schedule, 
+                           plot = False, plot_true_theta = None, coeff_theta = 1) : 
+    """
+    This function executes the Particle Gradient Descent in the context of our experiment. Given :
+    - The number of particles
+    - The number of iterations
+    - The step size
+    - Parameters of the prior distribution
+    - The observed data point "y"
+    - The initializing theta_0
+    """
+
+    theta_t = theta_0
+
+    dx = theta_0.shape[0]
+
+    sample = sample_prior_dx(nb_particles, centers_prior, covariances_prior, weights_prior)
+
+    time_SDE = 0
+
+    theta_traj = np.zeros((nb_iter, dx))
+
+    marginal_likelihood_traj = np.zeros(nb_iter)
+
+    schedule_traj = np.zeros(nb_iter)
+    
+    for i in tqdm(range(nb_iter)) : 
+
+        ## Update Schedule
+        time_SDE += step_size
+
+        schedule = np.minimum(np.minimum(end_schedule, time_SDE) / end_schedule + start_schedule, 1) #end_schedule is the date from which we are using the reel target distribution
+
+        gamma = 1 / np.sqrt(schedule)
+
+        gamma_sample = gamma * sample
+
+
+        ## Update Gradient 
+        grad = gamma * ((1/sigma_y**2) * theta_t[:, np.newaxis] * (y_obs - np.dot(theta_t, gamma_sample.T))).T 
+
+        grad += gamma * grad_multimodal_opti(gamma_sample, weights_prior, centers_prior, covariances_prior) 
+
+        taming_coef = step_size / (1 + step_size * np.linalg.norm(grad, axis = 1))
+
+        grad_update = taming_coef[:, np.newaxis] * grad
+        
+        #Noise
+        noise =  np.sqrt(2 * step_size) * np.random.randn(nb_particles, dx)
+
+        sample += grad_update + noise #Warning sign
+
+
+        #Update Parameter Theta
+        grad_theta = gamma * grad_theta_GM(gamma_sample, theta_t, y_obs, sigma_y)
+
+        grad_theta_update = np.sum(grad_theta, axis = 0)
+
+        theta_noise = np.sqrt(2 * step_size * coeff_theta / nb_particles) * np.random.randn(dx)
+
+        theta_t = theta_t - (step_size * coeff_theta / nb_particles) * grad_theta_update + theta_noise
+
+
+        #Update trajectories 
+        marginal_likelihood_traj[i] = marginal_likelihood_obs(theta_t, y_obs, sigma_y, centers_prior, weights_prior, log_like = False)
+
+        schedule_traj[i] = np.mean(schedule)
+
+        theta_traj[i] = theta_t
+
+
+        if np.sum(np.isnan(sample)) // dx > 850:
+
+            print('Too many NaN in the sample')
+            
+            return sample, theta_t, theta_traj
+
+    if plot : 
+
+        centers_post, covariances_post, weights_post = post_params_dx(plot_true_theta, sigma_y, centers_prior, covariances_prior, weights_prior, y_obs)
+        
+        sample_post = sample_prior_dx(1000, centers_post, covariances_post, weights_post)
+        
+        plot_sample_dx(sample, "IPLA Sample", sample_post, "True Posterior Sample")
+
+        #plot
+        plt.figure(figsize=(10, 8))
+
+        plt.plot(theta_traj[:, 0], theta_traj[:, 1], 'o-', markersize=4, label='Theta Trajectory')
+
+        #for i in range(1, len(theta_traj)):
+
+            #plt.arrow(theta_traj[i-1, 0], theta_traj[i-1, 1], 
+                    #theta_traj[i, 0] - theta_traj[i-1, 0], 
+                    #theta_traj[i, 1] - theta_traj[i-1, 1], 
+                    #head_width=0.05, head_length=0.1, fc='blue', ec='blue')
+            
+        plt.scatter(plot_true_theta[0], plot_true_theta[1], color='red', s=100, zorder=5, label='True Theta (1st 2 Dimensions)')
+        plt.text(plot_true_theta[0], plot_true_theta[1], s = f"({plot_true_theta[0]}, {plot_true_theta[1]})" , fontsize=12, verticalalignment='bottom', horizontalalignment='right')
+
+        plt.xlabel('Theta Dimension 1')
+        plt.ylabel('Theta Dimension 2')
+        plt.title(f'Trajectory of Theta in 2D - alpha {step_size}')
+        plt.legend()
+        plt.grid(True)
+        plt.show() 
+
+        plt.figure(figsize=(7, 7))
+        plt.plot(marginal_likelihood_traj, label='Marginal Likelihood')
+        plt.plot(schedule_traj, label='Schedule')
+        plt.legend()
+
+    print(f'At the end, the number of NaN in the final sample of particle is {np.sum(np.isnan(sample)) // dx}')
+
+    return sample, theta_t, theta_traj, marginal_likelihood_traj
 
 
 
