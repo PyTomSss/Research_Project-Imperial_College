@@ -925,7 +925,7 @@ def IPLA_Dilation_Adaptc_dx(nb_particles, step_param, nb_iter, centers_prior, co
 
             print('Too many NaN in the sample')
             
-            return sample, theta_t, theta_traj
+            return sample, theta_t, theta_traj, marginal_likelihood_traj
 
     if plot : 
 
